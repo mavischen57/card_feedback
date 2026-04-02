@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>2026 刷卡神助手 v5</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { -webkit-tap-highlight-color: transparent; font-family: -apple-system, system-ui; }
+        .tab-active { border-bottom: 3px solid #ef4444; color: #ef4444; }
+        .card-best { border: 2px solid #10b981; background-color: #f0fdf4; }
+        .tag-custom { background: #fef3c7; color: #92400e; } /* 自訂標籤顏色 */
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen pb-20">
+
+    <header class="bg-white shadow-sm sticky top-0 z-30">
+        <div class="px-4 py-3 flex justify-between items-center">
+            <div>
+                <h1 class="text-lg font-black text-gray-800">💳 刷卡戰情室</h1>
+                <p id="today-info" class="text-[10px] text-gray-500 font-bold"></p>
+            </div>
+            <div id="date-tag" class="px-2 py-1 rounded-lg text-[10px] font-bold"></div>
+        </div>
+        <div class="flex border-b text-sm">
+            <button onclick="switchTab('search')" id="tab-search" class="flex-1 py-3 text-center font-bold tab-active">🔍 最佳建議</button>
+            <button onclick="switchTab('all')" id="tab-all" class="flex-1 py-3 text-center font-bold text-gray-400">📋 全部通路</button>
+            <button onclick="switchTab('settings')" id="tab-settings" class="flex-1 py-3 text-center font-bold text-gray-400">⚙️ 自訂維護</button>
+        </div>
+    </header>
+
+    <main class="p-4">
+        <div id="page-search">
+            <input type="text" id="searchInput" oninput="doSearch()" placeholder="輸入關鍵字 (如: 日本, 蝦皮, 屈臣氏)" 
+                class="w-full p-4 mb-4 rounded-2xl shadow-lg border-none focus:ring-2 focus:ring-red-400 text-lg">
+            <div id="search-results" class="space-y-4"></div>
+        </div>
+
+        <div id="page-all" class="hidden space-y-4">
+            <div class="text-xs text-gray-400 px-1">包含內建官方通路與你的自訂通路</div>
+            <div id="full-list" class="grid grid-cols-1 gap-2"></div>
+        </div>
+
+        <div id="page-settings" class="hidden space-y-6">
+            <div class="bg-white p-4 rounded-2xl shadow-sm border">
+                <h3 class="font-bold mb-4 text-gray-800 text-sm">➕ 新增/修改自訂通路</h3>
+                <div class="space-y-3">
+                    <input type="text" id="edit-name" placeholder="通路名稱 (如: 巷口早餐店)" class="w-full p-2 border rounded-lg text-sm">
+                    <div class="grid grid-cols-2 gap-2">
+                        <select id="edit-r-plan" class="p-2 border rounded-lg text-xs">
+                            <option value="天天刷">R: 天天刷</option><option value="好饗刷">R: 好饗刷</option>
+                            <option value="數趣刷">R: 數趣刷</option><option value="玩旅刷">R: 玩旅刷</option>
+                            <option value="Pay著刷">R: Pay著刷</option><option value="大筆刷">R: 大筆刷</option>
+                        </select>
+                        <input type="number" id="edit-r-val" placeholder="Richart %" step="0.1" class="p-2 border rounded-lg text-sm">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 border-t pt-2">
+                        <select id="edit-f-spec" class="p-2 border rounded-lg text-xs">
+                            <option value="true">聯邦: 有偶數加碼</option>
+                            <option value="false">聯邦: 僅基本回饋</option>
+                        </select>
+                        <input type="number" id="edit-f-val" placeholder="聯邦最高 %" step="0.1" class="p-2 border rounded-lg text-sm">
+                    </div>
+                    <button onclick="saveCustomData()" class="w-full bg-red-500 text-white py-3 rounded-xl font-bold mt-2 shadow-md">儲存並覆蓋</button>
+                </div>
+            </div>
+
+            <div id="custom-manage-list" class="space-y-2">
+                </div>
+            <button onclick="clearAllCustom()" class="w-full py-2 text-xs text-gray-400 underline">重設所有自訂資料</button>
+        </div>
+    </main>
+
+    <script>
+        // --- 官方預設資料庫 (2026 最新) ---
+        const OFFICIAL_DB = [
+            { name: "LINE Pay", cat: "支付", r: {p:"Pay著刷", v:3.8}, f: {spec:false, v:2}, key: "lp" },
+            { name: "7-11 / 全家", cat: "超商", r: {p:"天天刷(限台新Pay)", v:3.3}, f: {spec:false, v:1}, key: "711,seven,cvs" },
+            { name: "屈臣氏 / 康是美 / 寶雅", cat: "藥妝", r: {p:"天天刷", v:3.3}, f: {spec:true, v:7}, key: "watson,poya" },
+            { name: "王品集團 / 瓦城", cat: "美食", r: {p:"好饗刷", v:3.3}, f: {spec:true, v:7}, key: "wong" },
+            { name: "麥當勞 / 肯德基 / 摩斯", cat: "美食", r: {p:"好饗刷", v:3.3}, f: {spec:true, v:7}, key: "mcd" },
+            { name: "Uber Eats / Foodpanda", cat: "外送", r: {p:"好饗刷", v:3.3}, f: {spec:false, v:1}, key: "ue,food" },
+            { name: "蝦皮 / momo / 酷澎", cat: "網購", r: {p:"數趣刷", v:3.3}, f: {spec:false, v:1}, key: "shopee,momo" },
+            { name: "日本消費 (含Suica)", cat: "旅遊", r: {p:"玩旅刷", v:3.3}, f: {spec:false, v:2.5}, key: "japan,suica" },
+            { name: "Netflix / Disney+ / YouTube", cat: "娛樂", r: {p:"數趣刷", v:3.3}, f: {spec:false, v:1} },
+            { name: "IKEA / 迪卡儂 / 特力屋", cat: "居家", r: {p:"大筆刷", v:3.3}, f: {spec:true, v:7} }
+        ];
+
+        let customDb = JSON.parse(localStorage.getItem('custom_card_db')) || [];
+        const today = new Date();
+        const isEven = (today.getDate() % 2 === 0);
+
+        function getMergedDb() {
+            // 合併邏輯：自訂資料優先於官方資料
+            const merged = [...customDb];
+            OFFICIAL_DB.forEach(offItem => {
+                if (!merged.find(c => c.name === offItem.name)) {
+                    merged.push(offItem);
+                }
+            });
+            return merged;
+        }
+
+        function switchTab(tab) {
+            ['search', 'all', 'settings'].forEach(t => {
+                document.getElementById(`page-${t}`).classList.toggle('hidden', t !== tab);
+                document.getElementById(`tab-${t}`).className = t === tab ? 'flex-1 py-3 text-center font-bold tab-active' : 'flex-1 py-3 text-center font-bold text-gray-400';
+            });
+            if(tab === 'all') renderFullList();
+            if(tab === 'settings') renderSettings();
+        }
+
+        function doSearch() {
+            const q = document.getElementById('searchInput').value.toLowerCase();
+            const res = document.getElementById('search-results');
+            if(!q) { res.innerHTML = ''; return; }
+
+            const db = getMergedDb();
+            const matches = db.filter(i => i.name.toLowerCase().includes(q) || (i.key && i.key.includes(q)));
+            
+            let html = '';
+            matches.forEach(item => {
+                const fRate = (item.f.spec && isEven) ? item.f.v : (item.f.spec ? 2 : (item.f.v || 1));
+                const rRate = item.r.v;
+                const win = rRate > fRate ? 'Richart' : (fRate > rRate ? '聯邦' : '皆可');
+                const isCustom = customDb.some(c => c.name === item.name);
+
+                html += `
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-sm font-bold">${item.name} ${isCustom ? '<span class="text-[10px] px-1 rounded tag-custom ml-1">自訂</span>' : ''}</span>
+                        <span class="text-[10px] text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full">💡 建議刷：${win}</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="p-3 rounded-xl ${win === 'Richart' || win === '皆可' ? 'card-best' : 'bg-gray-50'}">
+                            <p class="text-[10px] text-red-500 font-bold">Richart ${rRate}%</p>
+                            <p class="text-[9px] text-gray-400 mt-1">${item.r.p}</p>
+                        </div>
+                        <div class="p-3 rounded-xl ${win === '聯邦' || win === '皆可' ? 'card-best' : 'bg-gray-50'}">
+                            <p class="text-[10px] text-blue-500 font-bold">聯邦 ${fRate}%</p>
+                            <p class="text-[9px] text-gray-400 mt-1">${item.f.spec && !isEven ? '今日非偶數日' : 'LINE Pay回饋'}</p>
+                        </div>
+                    </div>
+                </div>`;
+            });
+            res.innerHTML = html || '<p class="text-center text-gray-400 py-10">找不到通路，去設定頁面新增一個吧！</p>';
+        }
+
+        function saveCustomData() {
+            const name = document.getElementById('edit-name').value;
+            if(!name) return alert('請輸入店名');
+            
+            const newItem = {
+                name,
+                r: { p: document.getElementById('edit-r-plan').value, v: parseFloat(document.getElementById('edit-r-val').value || 0) },
+                f: { spec: document.getElementById('edit-f-spec').value === 'true', v: parseFloat(document.getElementById('edit-f-val').value || 0) },
+                isCustom: true
+            };
+
+            customDb = customDb.filter(c => c.name !== name);
+            customDb.push(newItem);
+            localStorage.setItem('custom_card_db', JSON.stringify(customDb));
+            alert('已儲存！搜尋時會優先顯示此設定。');
+            renderSettings();
+        }
+
+        function deleteCustom(name) {
+            customDb = customDb.filter(c => c.name !== name);
+            localStorage.setItem('custom_card_db', JSON.stringify(customDb));
+            renderSettings();
+        }
+
+        function renderSettings() {
+            const container = document.getElementById('custom-manage-list');
+            container.innerHTML = '<h4 class="text-xs font-bold text-gray-400 mt-4 mb-2">已自訂項目</h4>' + 
+                customDb.map(i => `
+                <div class="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm text-xs border">
+                    <span>${i.name} <span class="text-gray-400">(${i.r.v}% / ${i.f.v}%)</span></span>
+                    <button onclick="deleteCustom('${i.name}')" class="text-red-500 font-bold">刪除</button>
+                </div>`).join('');
+        }
+
+        function renderFullList() {
+            const db = getMergedDb();
+            document.getElementById('full-list').innerHTML = db.sort((a,b) => a.name.localeCompare(b.name, 'zh-TW')).map(i => `
+                <div class="bg-white p-3 rounded-xl shadow-sm text-xs flex justify-between border-l-4 ${customDb.some(c=>c.name===i.name) ? 'border-amber-400' : 'border-gray-200'}">
+                    <span class="font-bold">${i.name}</span>
+                    <span class="text-gray-500">R:${i.r.v}% | F:${i.f.v}%</span>
+                </div>`).join('');
+        }
+
+        // 初始化日期標籤
+        const dayNames = ['日','一','二','三','四','五','六'];
+        document.getElementById('today-info').innerText = `${today.getMonth()+1}/${today.getDate()} (${dayNames[today.getDay()]})`;
+        const dTag = document.getElementById('date-tag');
+        dTag.innerText = isEven ? "偶數日加碼啟動" : "奇數日：聯邦一般";
+        dTag.className += isEven ? " bg-green-100 text-green-600" : " bg-gray-100 text-gray-400";
+
+        function clearAllCustom() { if(confirm('確定清除所有自訂資料？')) { localStorage.removeItem('custom_card_db'); location.reload(); } }
+
+    </script>
+</body>
+</html>
